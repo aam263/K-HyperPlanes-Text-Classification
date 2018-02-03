@@ -27,14 +27,14 @@ class vocabListings:
 		
 		wordDict = {}
 		for docId in documents:
-			#doc ids are in unicode
 			processedDoc = [stemmer.stem(w.lower()) for w in word_splitter.findall(reuters.raw(docId)) if not w in stop_words]
-			print(processedDoc)
+			#print(processedDoc)
 			for w in processedDoc:
 				if w not in wordDict:
 					wordDict[w] = {docId : processedDoc.count(w)}
 				else:
 					wordDict[w][docId] = processedDoc.count(w)
+		print("vocabProcess completed")
 		with open("vocabListings.txt", "wb") as f:
 			_pickle.dump(wordDict, f)
 	
@@ -74,7 +74,7 @@ class docsProcess:
 		#returns a normed tf-idf weighted doc
 		d = {}
 		for w in document:
-			idf = log(float(N)/(len(self.vocabulary[w])+1)) 
+			idf = log(float(N)/len(self.vocabulary[w])) 
 			if w not in d: d[w] = self.vocabulary[w][docId]*idf 
 		norm = docsProcess.norm(d)
 		for k, v in d.items(): # figure out how to use itertools or something here @AM
@@ -106,25 +106,27 @@ class docsProcess:
 			_pickle.dump(self.testDocs, f)
 
 
-	def updateNeighbors(self,docId,currNode,k=5): #check if it simultaneously updates dict and returns desired value
+	def updateNeighbors(self,currId,currNode,k=5): #check if it simultaneously updates dict and returns desired value
 		currNode_neighbors = []
 		for docId, docNode in self.trainDocs.items():
 			dist = docsProcess.dot(currNode.doc_vec,docNode.doc_vec) #this is what makes this n^2, should instead see if feature selection will make this faster
+			#print(currId, docId, dist)
 			if len(currNode_neighbors) < k: 
 				heapq.heappush(currNode_neighbors, (dist, docId))
 			else:
 				if currNode_neighbors[0][0] < dist: heapq.heapreplace(currNode_neighbors, (dist, docId)) 
 			if len(docNode.k_neighbors) < k: 
-				heapq.heappush(docNode.k_neighbors, (dist, docId))	
+				heapq.heappush(docNode.k_neighbors, (dist, currId))	
 			else: 
-				if docNode.k_neighbors[0][0] < dist: heapq.heapreplace(docNode.k_neighbors, (dist, docId))
+				if docNode.k_neighbors[0][0] < dist: heapq.heapreplace(docNode.k_neighbors, (dist, currId))
 		return currNode_neighbors
+
 
 
 if __name__ == "__main__":
 	documents = reuters.fileids()
-	test = docsProcess(documents)
-	
+	#vocabListings.vocabProcess(documents)
+	obj = docsProcess(documents)
 	
 	
 	
