@@ -10,122 +10,116 @@ from re import compile
 from re import VERBOSE
 from time import time
 
-class docNode:
-	#should include a way to show which categories doc is in
-	def __init__(self,document):
-		self.doc_vec = document
-		self.k_neighbors = []
+
+"""Takes processed Docs and creates vocabList, a 
+dictionary of the form {word : {docId : word frequency in doc}}.
+"""
+
+"""
+First problem, should initial termFreqDict and categoryDict be made with solely training docs (yes)?
+
+Isn't that the point? But then you'd have to concern yourself with terms in the test docs
+that arent in the training docs? Would you just ignore than?
+
+-----------------------------------------------------------------------------------------------
+
+To filter properly, first create termFreqDict, categoryDict, and termCategoryDict as usual.
+Filtering requires noise input, so first run must be with unfiltered docs.
+
+When you preprocess, you have to first filter termFreqDict within the docsProcess class. Then
+remake the termCategoryDict using remade termFreqDict.
+
+After this you can use doc_to_vec (after filtering) with proper tf-idf values so that values
+are properly normed, and all your training docs have the required, filtered form.
+
+---------------------------------------------------------------------------------------------------
+
+Now that training docs will be taken care of, how do we deal with test docs? They won't be filtered
+so we can just filter the termFreqDict and use those values to determine doc vecs, except have to 
+take care of words that are in test docs but not in training docs.
+
+If we add new words to the pre-existing dictionaries, will we have recalc all tf-idf everytime 
+a new doc is added (yes)? will that result in the need to retrim every doc as you go (yes)? 
+
+So we should just ignore new words and assume that the training docs are enough to give decent result.
+So ignore new words when converting test docs to vectors.
+
+
+"""
+#necessary for load fn (below)
+word_splitter = compile(r"\w+", VERBOSE)
+stemmer=PorterStemmer()#
+stop_words = set(stopwords.words('english'))
+	
+def vocabFreqProcess(trainDocs):
+	#must have a threadpool p initialized
+	#bottleneck
+	#print(len(trainDocs)) # debug
+	termFreqDict = {}
+	processedDocs = {}
+	for docId, processedDoc in p.imap_unordered(vfpHelper, trainDocs):
+		processedDocs[docId] = processedDoc
+		for w in processedDoc:
+			if w not in termFreqDict:
+				#might need a lock
+				termFreqDict[w] = {docId : processedDoc.count(w)}
+			else:
+				termFreqDict[w][docId] = processedDoc.count(w)
+	#print(len(processedDocs)) # debug
+	print("vocabFreqProcess completed")
+	return (termFreqDict, processedDocs)
+
+def vfpHelper(docId):
+	processedDoc = [stemmer.stem(w.lower()) for w in word_splitter.findall(reuters.raw(docId)) if not w in stop_words]
+	return (docId, processedDoc)
+			
+	
+	
+def categoryProcess(categories): #reuters.categories()
+	#only takes into account train docs
+	#used for fast feature selection (to calc chi^2)
+	categoryDict = {}
+	for cat in categories:
+		catDocs = [docId for docId in reuters.fileids(cat) if "train" in docId]
+		categoryDict[cat] = set(catDocs)  
+	print("categoryProcess completed")
+	return categoryDict
+
+def vocabCategoryProcess(termFreqDict, categoryDict):
+	#used for fast feature selection (to calc chi^2)
+	#will be in terms of training docs since both termfreq & categoryDict are
+	termCategoryDict = {}
+	for t in termFreqDict:
+		for category, docs in categoryDict.items():
+			catOverlap = len(docs.intersection(termFreqDict[t].keys()))
+			if t not in termCategoryDict:
+				if catOverlap > 0: termCategoryDict[t] = {category : catOverlap}
+			else:
+				if catOverlap > 0: termCategoryDict[t][category] = catOverlap #typo
+	print("vocabCategoryProcess completed")
+	return termCategoryDict
+
+def load(trainDocs, categories):
+	#stores unfiltered dicts of interest
+	t0 = time()
+	(termFreqDict, processedTrainDocs) = vocabFreqProcess(trainDocs)
+	categoryDict = categoryProcess(categories)
+	termCategoryDict = vocabCategoryProcess(termFreqDict, categoryDict)
+	with open("processedTrainDocs_unfiltered.txt", "wb") as f:
+		_pickle.dump(processedTrainDocs, f)
+	with open("termFreqDict_unfiltered.txt", "wb") as f:
+		_pickle.dump(termFreqDict, f)
+	with open("categoryDict.txt", "wb") as f:
+		_pickle.dump(categoryDict, f)
+	with open("termCategoryDict_unfiltered.txt", "wb") as f:
+		_pickle.dump(termCategoryDict, f)
+	print("load method takes "+"{:.3}".format(time()-t0)+"seconds") # takes around 34 secs
 
 
 class docsPreProcess:
-	"""Takes processed Docs and creates vocabList, a 
-	dictionary of the form {word : {docId : word frequency in doc}}.
-	"""
-
-	"""
-	First problem, should initial termFreqDict and categoryDict be made with solely training docs (yes)?
-
-	Isn't that the point? But then you'd have to concern yourself with terms in the test docs
-	that arent in the training docs? Would you just ignore than?
-
-	-----------------------------------------------------------------------------------------------
-
-	To filter properly, first create termFreqDict, categoryDict, and termCategoryDict as usual.
-	Filtering requires noise input, so first run must be with unfiltered docs.
-
-	When you preprocess, you have to first filter termFreqDict within the docsProcess class. Then
-	remake the termCategoryDict using remade termFreqDict.
-
-	After this you can use doc_to_vec (after filtering) with proper tf-idf values so that values
-	are properly normed, and all your training docs have the required, filtered form.
-
-	---------------------------------------------------------------------------------------------------
-
-	Now that training docs will be taken care of, how do we deal with test docs? They won't be filtered
-	so we can just filter the termFreqDict and use those values to determine doc vecs, except have to 
-	take care of words that are in test docs but not in training docs.
-
-	If we add new words to the pre-existing dictionaries, will we have recalc all tf-idf everytime 
-	a new doc is added (yes)? will that result in the need to retrim every doc as you go (yes)? 
-
-	So we should just ignore new words and assume that the training docs are enough to give decent result.
-	So ignore new words when converting test docs to vectors.
-
-
-	"""
-
-	@staticmethod
-	def __vocabFreqProcess(trainDocs):
-		#put multiprocessing here or multithreading?
-		p = multiprocessing.pool()
-		word_splitter = compile(r"\w+", VERBOSE)
-		stemmer=PorterStemmer()#
-		stop_words = set(stopwords.words('english'))
-		
-		termFreqDict = {}
-		processedDocs = {}
-		for docId in trainDocs:
-			print(docId)
-			processedDoc = [stemmer.stem(w.lower()) for w in word_splitter.findall(reuters.raw(docId)) if not w in stop_words]
-			#print(processedDoc)
-			processedDocs[docId] = processedDoc
-			for w in processedDoc:
-				if w not in termFreqDict:
-					termFreqDict[w] = {docId : processedDoc.count(w)}
-				else:
-					termFreqDict[w][docId] = processedDoc.count(w)
-		print("vocabFreqProcess completed")
-		return (termFreqDict, processedDocs)
-
-		#def helper(docId, stemmer, word_splitter, stop_words):
-		#	processedDoc = [stemmer.stem(w.lower()) for w in word_splitter.findall(reuters.raw(docId)) if not w in stop_words]
-
-			
-	
-	@staticmethod
-	def __categoryProcess(categories): #reuters.categories()
-		#only takes into account train docs
-		#used for fast feature selection (to calc chi^2)
-		categoryDict = {}
-		for cat in categories:
-			catDocs = [docId for docId in reuters.fileids(cat) if "train" in docId]
-			categoryDict[cat] = set(catDocs)  
-		print("categoryProcess completed")
-		return categoryDict
-
-	@staticmethod
-	def __vocabCategoryProcess(termFreqDict, categoryDict):
-		#used for fast feature selection (to calc chi^2)
-		#will be in terms of training docs since both termfreq & categoryDict are
-		termCategoryDict = {}
-		for t in termFreqDict:
-			for category, docs in categoryDict.items():
-				catOverlap = len(docs.intersection(termFreqDict[t].keys()))
-				if t not in termCategoryDict:
-					if catOverlap > 0: termCategoryDict[t] = {category : catOverlap}
-				else:
-					if catOverlap > 0: termCategoryDict[t][category] = catOverlap #typo
-		print("vocabCategoryProcess completed")
-		return termCategoryDict
-
-	@staticmethod
-	def load(trainDocs, categories):
-		#stores unfiltered dicts of interest
-		t0 = time()
-		(termFreqDict, processedTrainDocs) = docsPreProcess.__vocabFreqProcess(trainDocs)
-		categoryDict = docsPreProcess.__categoryProcess(categories)
-		termCategoryDict = docsPreProcess.__vocabCategoryProcess(termFreqDict, categoryDict)
-		with open("processedTrainDocs_unfiltered.txt", "wb") as f:
-			_pickle.dump(processedTrainDocs, f)
-		with open("termFreqDict_unfiltered.txt", "wb") as f:
-			_pickle.dump(termFreqDict, f)
-		with open("categoryDict.txt", "wb") as f:
-			_pickle.dump(categoryDict, f)
-		with open("termCategoryDict_unfiltered.txt", "wb") as f:
-			_pickle.dump(termCategoryDict, f)
-		print("load method takes "+"{:.3}".format(time()-t0)+"seconds")
 
 	def __init__(self, trainDocs, categories):
+		t0 = time()
 		self.NumDocs = len(trainDocs)
 		with open("termFreqDict_unfiltered.txt", "rb") as f:
 			self.termFreqDict = _pickle.load(f)
@@ -133,11 +127,26 @@ class docsPreProcess:
 			self.categoryDict = _pickle.load(f)
 		with open("termCategoryDict_unfiltered.txt", "rb") as f:
 			self.termCategoryDict = _pickle.load(f)
+		with open("processedTrainDocs_unfiltered.txt", "rb") as f:
+			self.trainDocs = _pickle.load(f)
+
+		(self.trainDocs, self.termFreqDict, self.termCategoryDict) = self.featureFilter(self.trainDocs)
+
+		with open("processedTrainDocs_filtered.txt", "wb") as f:
+			_pickle.dump(self.trainDocs, f)
+		with open("termFreqDict_filtered.txt", "wb") as f:
+			_pickle.dump(self.termFreqDict, f)
+		with open("termCategoryDict_filtered.txt", "wb") as f:
+			_pickle.dump(self.termCategoryDict, f)
+
+		print("startup w/ filteringtakes "+"{:.3}".format(time()-t0))
+		#takes around 1.5 secs
+		#should I initialize unfiltered docs
 
 
 	def featureFilter(self, trainDocs):
-		
-		print("featureFiltering begun")
+		#uses
+		print("feature filtering begun")
 
 		termFreqDict = {}
 		trainDocs = {} #return trainDocs too
@@ -153,12 +162,9 @@ class docsPreProcess:
 					termFreqDict[w] = {docId : filteredDoc.count(w)}
 				else:
 					termFreqDict[w][docId] = filteredDoc.count(w)
-		termCategoryDict = docsPreProcess.__vocabCategoryProcess(termFreqDict, self.categoryDict)
-		return (termFreqDict, termCategoryDict)
-
-
-
-		print("reFilter complete")
+		termCategoryDict = vocabCategoryProcess(termFreqDict, self.categoryDict)
+		print("feature filter complete")
+		return (trainDocs, termFreqDict, termCategoryDict)
 
 
 	def featureFilterChi(self, docId, processedDoc, minLength = 15, k = 10):
@@ -173,7 +179,7 @@ class docsPreProcess:
 		the amount of terms you want to filter off, and minLength is the min
 		length of the prcessed doc allowed to be filtered."""
 
-		#also assumes that short docs are more descriptive, so shorter docs are unchanged (can adapt this though)
+		#assumes short docs are more descriptive, so shorter docs unchanged (can adapt this though)
 		
 		#test
 		filteredDoc = []
@@ -204,7 +210,14 @@ class docsPreProcess:
 		chi_val = ((n00+n01+n10+n11)*((n11*n00-n10*n01)**2))/((n11+n01)*(n11+n10)*(n10+n00)*(n01+n00)) # horners algorithm?
 		return chi_val
 
-########################################################################################################
+############################################################################################################################################################################################
+
+class docNode:
+	#should include a way to show which categories doc is in
+	def __init__(self,document):
+		self.doc_vec = document
+		self.k_neighbors = []
+
 class docsProcess:
 	"""We have filtered training docs, filtered termFreqDict, and filtered termCategoryDict.
 	So now we need to process (a.k.a nearest neighbor fixing) -- make docs process solely about
@@ -339,7 +352,11 @@ if __name__ == "__main__":
 	docs = reuters.fileids()
 	docs = [ids for ids in docs if 'training' in ids]
 	categories = reuters.categories()
-	obj = docsPreProcess.load(docs, categories)
+	#p = multiprocessing.Pool()
+	#load(docs, categories)
+	#with open("processedTrainDocs_unfiltered.txt", "rb") as f:
+	#	trainDocs = _pickle.load(f)
+	obj = docsPreProcess(docs, categories)
 	#vocabListings.vocabFreqProcess(documents)
 	#vocabListings.categoryProcess(categories)
 	#with open("termFreqDict.txt", "rb") as f:
